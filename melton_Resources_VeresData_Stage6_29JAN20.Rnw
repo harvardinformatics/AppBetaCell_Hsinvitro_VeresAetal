@@ -1,0 +1,277 @@
+\documentclass[a4paper]{article}
+\usepackage{Sweave}
+\begin{document}
+
+\title{}
+\author{}
+
+\maketitle
+
+<<label=libraries, echo=FALSE, eval=TRUE>>=
+library(dplyr)
+library(Seurat)
+library(SingleCellExperiment)
+
+X11.options(width=5.5, height=5.5, xpos=1850, ypos=765)
+
+options(editor="/usr/bin/vim")
+options(stringsAsFactors=FALSE)
+
+Sweave('ndv_Functions_Seurat_mmSC_01NOV19_copy.Rnw')
+scratch.path <- '/scratch/jstraubhaar/VeresAetal_Nature_569_368_2019'
+store.path <- '/scratch/jstraubhaar/VeresAetal_Nature_569_368_2019/Stage6'
+
+@ 
+
+<<label=loading, echo=FALSE, eval=FALSE>>=
+allproc6.df <- read.table(gzfile(paste(scratch.path, 'GSE114412_Stage_6.all.processed_counts.tsv.gz', sep='/')), header=TRUE, quote='', sep='\t', comment.char="")
+save(allproc6.df, file=paste(store.path, 'allproc6.df.rda', sep='/'))
+
+allmeta6.df <- read.table(gzfile(paste(scratch.path, 'GSE114412_Stage_6.all.cell_metadata.tsv.gz', sep='/')), header=TRUE, quote='', sep='\t')
+save(allmeta6.df, file=paste(store.path, 'allmeta6.df.rda', sep='/'))
+
+stop('STOP - loading')
+
+@ 
+
+<<label=matrix2seurat, echo=FALSE, eval=FALSE>>=
+if (!any(grepl('allproc6.df', ls()))) load(paste(store.path, 'allproc6.df.rda', sep='/'))
+if (!any(grepl('allmeta6.df', ls()))) load(paste(store.path, 'allmeta6.df.rda', sep='/'))
+
+rownames(allproc6.df)  <- allproc6.df$X..library.barcode
+allproc6.df <- allproc6.df[-1]
+allproc6.m <- t(allproc6.df)
+
+sce6 <- SingleCellExperiment(assays=list(counts=allproc6.m))
+sobj6 <- as.Seurat(sce6, counts='counts', data=NULL)
+
+save(sce6, sobj6, file=paste(store.path, 'sce6_sobj6.rda', sep='/'))
+
+stop('STOP - matrix to seurat')
+
+@ 
+<<label=seuratproc, echo=FALSE, eval=FALSE>>=
+psobj6 <- proc2Norm(sobj6)
+psobj62C <- proc2VarFeature_v1(psobj6, nfeat=1000)
+psobj62C <- ScaleData(psobj62C, do.scale=FALSE)
+save(psobj62C, file=paste(store.path, 'psobj62C_1.rda', sep='/'))
+
+stop('STOP - proc seurat')
+
+@ 
+<<label=seuratclust, echo=FALSE, eval=FALSE>>=
+findNeighborsAndClusters <- function(seuratobj, red='pca', dim=30, k=20, rltn=0.8) {
+    dim <- as.integer(dim)
+    k <- as.integer(k)
+    rltn <- as.numeric(rltn)
+    obj <- FindNeighbors(seuratobj, reduction=red, dims=1:dim, k.param=20, prune.SNN=1/15, verbose = FALSE)
+    obj <- FindClusters(obj, resolution=rltn, algorithm=1, group.singletons=FALSE, verbose = FALSE)
+    
+    return(obj)
+}
+
+if (!any(grepl('psobj62C', ls()))) load(paste(store.path, 'psobj62C_1.rda', sep='/'))
+
+psobj62C <- RunPCA(psobj62C, npcs=50, verbose = FALSE)
+
+psobj62C_03 <- findNeighborsAndClusters(psobj62C, dim=50, rltn=0.3)
+psobj62C_08 <- findNeighborsAndClusters(psobj62C, dim=50, rltn=0.8)
+psobj62C_15 <- findNeighborsAndClusters(psobj62C, dim=50, rltn=1.5)
+save(psobj62C_03, psobj62C_08, psobj62C_15, file=paste(store.path, 'psobj62C_2.rda', sep='/'))
+
+stop('STOP - clust')
+
+@ 
+<<label=seuratdimredtsne, echo=FALSE, eval=FALSE>>=
+dotsne <- function(seuratobj, dim=50, perpl=500) {
+    dim <- as.integer(dim)
+    perpl <- as.integer(perpl)
+    procdobj <- RunTSNE(seuratobj, dims=1:dim, verbose=FALSE, perplexity=perpl, check_duplicates=FALSE)
+    return(procdobj)
+}
+
+if (!any(grepl('psobj62C_03', ls()))) load(paste(store.path, 'psobj62C_2.rda', sep='/'))
+
+message('ding')
+psobj62C_03_50 <- dotsne(psobj62C_03, perpl=50)
+save(psobj62C_03_50, file=paste(store.path, 'psobj62C_03.rda', sep='/'))
+message('dang')
+psobj62C_08_50 <- dotsne(psobj62C_08, perpl=50)
+save(psobj62C_08_50, file=paste(store.path, 'psobj62C_08.rda', sep='/'))
+message('dong')
+psobj62C_15_50 <- dotsne(psobj62C_15, perpl=50)
+save(psobj62C_15_50, file=paste(store.path, 'psobj62C_15.rda', sep='/'))
+
+stop('STOP - here')
+
+@ 
+<<label=seuratdimredumap, echo=FALSE, eval=FALSE>>=
+if (!any(grepl('psobj62C_03', ls()))) load(paste(store.path, 'psobj62C_2.rda', sep='/'))
+
+psobj62C03 <- RunUMAP(psobj62C_03, dims = 1:10, verbose=FALSE)
+psobj62C08 <- RunUMAP(psobj62C_08, dims = 1:10, verbose=FALSE)
+psobj62C15 <- RunUMAP(psobj62C_15, dims = 1:10, verbose=FALSE)
+save(psobj62C03, psobj62C08, psobj62C15, file=paste(store.path, 'psobj62C03.rda', sep='/'))
+
+stop('STOP - UMAP')
+
+@ 
+
+<<label=identifyEC, echo=FALSE, eval=FALSE>>=
+if (!any(grepl('allmeta6.df', ls()))) load(paste(store.path, 'allmeta6.df.rda', sep='/'))
+
+ec6.df <- allmeta6.df[allmeta6.df$Assigned_cluster == 'sc_ec', ] # 7812 cells
+ecc6 <- ec6.df$library.barcode
+
+slst6 <- sapply(unique(allmeta6.df$Assigned_cluster), function(x) {
+    df <- allmeta6.df[allmeta6.df$Assigned_cluster == x, ]
+    df$library.barcode
+})
+
+stop('STOP - here')
+
+@ 
+
+<<label=plottingtsne, echo=FALSE, eval=FALSE>>=
+if (!any(grepl('psobj62C_03_50', ls()))) load(paste(store.path, 'psobj62C_03.rda', sep='/'))
+
+straightcols <- unique(sub('[0-9]+', '', colors()))
+straightnogray <- straightcols[grep('grey|gray', straightcols, invert=TRUE)]
+#usecolors <- sample(straightnogray, 12)
+
+#pdf('Results/tSNE_withclusters_veres_data_withlegend.pdf')
+#pdf('Results/tSNE_withclusters_withannot_veres_data_nolegend_withlabel.pdf')
+p <- DimPlot(psobj62C_03_50, cells.highlight=slst6, cols.highlight=usecolors, sizes.highlight=0.1, label=FALSE)
+p <- p +  ggtitle('tSNE Plot Stage 6 Annotated Veres Data') + theme(title=element_text(size=10))# + NoLegend()
+plot(p)
+#dev.off()
+
+stop('STOP - plotting tSNE')
+
+DimPlot(psobj62C_03_50, label=TRUE) + NoLegend() + ggtitle('') + theme(title=element_text(size=10))
+
+#FeaturePlot(psobj62C_03_50, features='INS')  + ggtitle('INS') + theme(title=element_text(size=10))
+#FeaturePlot(psobj62C_03_50, features='TPH1')  + ggtitle('INS') + theme(title=element_text(size=10))
+#FeaturePlot(psobj62C_03_50, features='ADRA2A')  + ggtitle('ADRA2A') + theme(title=element_text(size=10))
+#FeaturePlot(psobj62C_08_50, features='ADRA2A')  + ggtitle('ADRA2A') + theme(title=element_text(size=10))
+FeaturePlot(psobj62C_15_50, features='ADRA2A')  + ggtitle('ADRA2A') + theme(title=element_text(size=10))
+#FeaturePlot(psobj62C_03_50, features='MIME')  + ggtitle('MIME') + theme(title=element_text(size=10))
+
+@ 
+<<label=plottingumap, echo=FALSE, eval=FALSE>>=
+if (!any(grepl('psobj62C03', ls()))) load(paste(store.path, 'psobj62C03.rda', sep='/'))
+
+p <- DimPlot(psobj62C03, cells.highlight=slst6, cols.highlight=usecolors, sizes.highlight=0.1, label=FALSE)
+p <- p +  ggtitle('UMAP Plot Stage 6 Annotated Veres Data') + theme(title=element_text(size=10))
+plot(p)
+
+stop('STOP - plotting UMAP')
+
+DimPlot(psobj62C03, label=TRUE) + NoLegend() + ggtitle('UMAP') + theme(title=element_text(size=10))
+#DimPlot(psobj62C08, label=TRUE) + NoLegend() + ggtitle('UMAP') + theme(title=element_text(size=10))
+#DimPlot(psobj62C15, label=TRUE) + NoLegend() + ggtitle('UMAP') + theme(title=element_text(size=10))
+
+@ 
+
+<<label=verestsne, echo=FALSE, eval=FALSE>>=
+if (!any(grepl('psobj62C_03_50', ls()))) load(paste(store.path, 'psobj62C_03.rda', sep='/'))
+
+cpobj6 <- psobj62C_03_50
+emb6.m <- psobj62C_03_50@reductions$tsne@cell.embeddings
+
+veremb6.df <- allmeta6.df[, c(1, 4, 5)]
+rownames(veremb6.df)  <- veremb6.df$library.barcode
+veremb6.df <- veremb6.df[-1]
+veremb6.m <- as.matrix(veremb6.df)
+colnames(veremb6.m)  <- c("tSNE_1", "tSNE_2")
+
+cpobj6@reductions$tsne@cell.embeddings <- veremb6.m
+
+annot6 <- allmeta6.df$Assigned_cluster
+names(annot6)  <- allmeta6.df$library.barcode
+cpobj6 <- AddMetaData(cpobj6, metadata=annot6, col.name='Assigned_cluster')
+save(cpobj6, file=paste(store.path, 'cpobj6.rda', sep='/'))
+
+stop('STOP - this')
+
+@ 
+
+% D013120 ok
+<<label=plottingagain, echo=FALSE, eval=FALSE>>=
+if (!any(grepl('cpobj6', ls()))) load(paste(store.path, 'cpobj6.rda', sep='/'))
+
+#pdf('Results/verestSNE_withclusters_withannot_veres_data_withlabels.pdf')
+p <- DimPlot(cpobj6, cells.highlight=slst, cols.highlight=usecolors, sizes.highlight=0.1, label=FALSE)
+p <- p +  ggtitle('Veres Coords tSNE Plot Annotated Veres Data') + theme(title=element_text(size=10))# + NoLegend()
+plot(p)
+#dev.off()
+
+p <- DimPlot(psobj62C_03_50, cells.highlight=slst6, cols.highlight=usecolors, sizes.highlight=0.1, label=FALSE)
+p <- p +  ggtitle('tSNE Plot Stage 6 Annotated Veres Data') + theme(title=element_text(size=10))# + NoLegend()
+X11()
+plot(p)
+
+
+stop('STOP - again plotting')
+
+@ 
+<<label=checkingmarkers, echo=FALSE, eval=FALSE>>=
+if (!any(grepl('cpobj6', ls()))) load(paste(store.path, 'cpobj6.rda', sep='/'))
+
+#pdf('Results/verestSNE_assigned_clusters_withlegend.pdf')
+DimPlot(cpobj6, group.by='Assigned_cluster')
+#dev.off()
+
+# EC cell markers
+
+#FeaturePlot(cpobj6, features='ADD3')
+#FeaturePlot(cpobj6, features='GNAS')
+FeaturePlot(cpobj6, features='AP2B1')
+
+stop('STOP - checking')
+
+@ 
+<<label=markers, echo=FALSE, eval=FALSE>>=
+ec.markers6.df <- FindMarkers(cpobj6, group.by='Assigned_cluster', ident.1='sc_ec', min.pct=0.25)
+save(ec.markers6.df, file=paste(store.path, 'ec.markers6.df.rda', sep='/'))
+
+@ 
+
+% OK!
+<<label=processmarkers, echo=FALSE, eval=FALSE>>=
+if (!any(grepl('cpobj6', ls()))) load(paste(store.path, 'cpobj6.rda', sep='/'))
+if (!any(grepl('ec.markers6.df', ls()))) load(paste(store.path, 'ec.markers6.df.rda', sep='/'))
+
+write.table(rownames(ec.markers6.df[ec.markers6.df$p_val_adj < 0.05, ]), file='Results/ec.markers_stage6.txt', quote=FALSE, sep='\t', row.names=FALSE, col.names=FALSE)
+
+ecCMmarkers6.df <- read.table('../Julia/ecMarkers_stage6_CellMembrane_gene.txt', header=FALSE, sep='\t')
+ecCMmarkers6.gn <- ecCMmarkers6.df[, 1]
+
+ecCMmarkers6.gn <- sub('Name=', '', sub(' \\{.*', '', sub(';.*', '', sub('.*(Name=.*)', '\\1', ecCMmarkers6.gn))))
+
+for (gene in ecCMmarkers6.gn) {
+    message(paste(gene, ' ...', sep=''))
+    p <- FeaturePlot(cpobj6, features=gene)
+    plot(p)
+    Sys.sleep(3)
+}
+    
+@ 
+<<label=checkstage5markers, echo=FALSE, eval=TRUE>>=
+# bash: sed -n '/^GN   Name=/ p' ecMarkers_stage5_CellMembrane_uniprot.dat > ecMarkers_stage5_CellMembrane_gene.txt
+
+ecCMmarkers5.df <- read.table('../Julia/ecMarkers_stage5_CellMembrane_gene.txt', header=FALSE, sep='\t')
+ecCMmarkers5.gn <- ecCMmarkers5.df[, 1]
+
+ecCMmarkers5.gn <- sub('Name=', '', sub(' \\{.*', '', sub(';.*', '', sub('.*(Name=.*)', '\\1', ecCMmarkers5.gn))))
+
+for (gene in ecCMmarkers5.gn) {
+    message(paste('Stage5 ', gene, ' expressed in Stage6...', sep=''))
+    p <- FeaturePlot(cpobj6, features=gene)
+    plot(p)
+    Sys.sleep(3)
+}
+    
+@ 
+
+\end{document}

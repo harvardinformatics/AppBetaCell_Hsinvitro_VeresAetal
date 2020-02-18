@@ -1,0 +1,212 @@
+\documentclass[a4paper]{article}
+\usepackage{Sweave}
+\begin{document}
+
+\title{}
+\author{}
+
+\maketitle
+
+<<label=libraries, echo=FALSE, eval=TRUE>>=
+library(dplyr)
+library(Seurat)
+library(ggplot2)
+#library(SingleCellExperiment)
+
+#X11.options(width=5.5, height=5.5, xpos=1850, ypos=765)
+
+options(editor="/usr/bin/vim")
+options(stringsAsFactors=FALSE)
+
+#Sweave('ndv_Functions_Seurat_mmSC_01NOV19_copy.Rnw')
+#dat.path <- '/n/holylfs/LABS/informatics/jstraubhaar/VeresAetal_Nature_569_368_2019'
+#store5.path <- '/scratch/jstraubhaar/VeresAetal_Nature_569_368_2019/Stage5'
+
+#stop('STOP - initialize')
+
+@ 
+
+<<label=loading, echo=FALSE, eval=FALSE>>=
+allprcsd5.df <- read.table(paste(dat.path, 'GSE114412_Stage_5.all.processed_counts.tsv', sep='/'), header=TRUE, quote='', sep='\t', comment.char="")
+save(allprcsd5.df, file=paste(store5.path, 'allprcsd5.df.rda', sep='/'))
+
+#raw5.df <- read.table(paste(dat.path, 'GSE114412_Stage_5.raw_indrops_counts.tsv', sep='/'), header=TRUE, quote='', sep='\t', comment.char="")
+
+@ 
+
+<<label=matrix2seurat, echo=FALSE, eval=FALSE>>=
+if (!any(grepl('allprcsd5.df', ls()))) load(paste(store5.path, 'allprcsd5.df.rda', sep='/'))
+
+rownames(allprcsd5.df)  <- allprcsd5.df$X..library.barcode
+allprcsd5.df <- allprcsd5.df[-1]
+allprcsd5.m <- t(allprcsd5.df)
+
+sce5 <- SingleCellExperiment(assays=list(counts=allprcsd5.m))
+obj5 <- as.Seurat(sce5, counts='counts', data=NULL)
+
+save(sce5, obj5, file=paste(store5.path, 'sce5_obj5.rda', sep='/'))
+
+@ 
+<<label=seuratproc, echo=FALSE, eval=FALSE>>=
+pobj5 <- proc2Norm(obj5)
+pobj5_1K <- proc2VarFeature_v1(pobj5, nfeat=1000)
+pobj5_1K <- ScaleData(pobj5_1K, do.scale=FALSE)
+save(pobj5_1K, file=paste(store5.path, 'pobj5_1K_1.rda', sep='/'))
+
+@ 
+<<label=seuratclust, echo=FALSE, eval=FALSE>>=
+findNeighborsAndClusters <- function(seuratobj, red='pca', dim=30, k=20, rltn=0.8) {
+    dim <- as.integer(dim)
+    k <- as.integer(k)
+    rltn <- as.numeric(rltn)
+    obj <- FindNeighbors(seuratobj, reduction=red, dims=1:dim, k.param=20, prune.SNN=1/15, verbose = FALSE)
+    obj <- FindClusters(obj, resolution=rltn, algorithm=1, group.singletons=FALSE, verbose = FALSE)
+    
+    return(obj)
+}
+
+pobj5_1K <- RunPCA(pobj5_1K, npcs=50, verbose = FALSE)
+
+pobj5_1K_03 <- findNeighborsAndClusters(pobj5_1K, dim=50, rltn=0.3)
+pobj5_1K_08 <- findNeighborsAndClusters(pobj5_1K, dim=50, rltn=0.8)
+pobj5_1K_15 <- findNeighborsAndClusters(pobj5_1K, dim=50, rltn=1.5)
+save(pobj5_1K_03, pobj5_1K_08, pobj5_1K_15, file=paste(store5.path, 'pobj5_1K_2.rda', sep='/'))
+
+@ 
+<<label=seuratdimredtsne, echo=FALSE, eval=FALSE>>=
+dotsne <- function(seuratobj, dim=50, perpl=500) {
+    dim <- as.integer(dim)
+    perpl <- as.integer(perpl)
+    procdobj <- RunTSNE(seuratobj, dims=1:dim, verbose=FALSE, perplexity=perpl, check_duplicates=FALSE)
+    return(procdobj)
+}
+
+message('ding')
+pobj5_1K_03_50t <- dotsne(pobj5_1K_03, perpl=50)
+save(pobj5_1K_03_50t, file=paste(store5.path, 'pobj5_1K_03t.rda', sep='/'))
+message('dang')
+pobj5_1K_08_50t <- dotsne(pobj5_1K_08, perpl=50)
+save(pobj5_1K_08_50t, file=paste(store5.path, 'pobj5_1K_08t.rda', sep='/'))
+message('dong')
+pobj5_1K_15_50t <- dotsne(pobj5_1K_15, perpl=50)
+save(pobj5_1K_15_50t, file=paste(store5.path, 'pobj5_1K_15t.rdat', sep='/'))
+
+@ 
+
+<<label=seuratdimredumap, echo=FALSE, eval=FALSE>>=
+if (!any(grepl('pobj5_1K_03', ls()))) load(paste(store5.path, 'pobj5_1K_2.rda', sep='/'))
+
+pobj5_1K_03u <- RunUMAP(pobj5_1K_03, dims = 1:10, verbose=FALSE)
+pobj5_1K_08u <- RunUMAP(pobj5_1K_08, dims = 1:10, verbose=FALSE)
+pobj5_1K_15u <- RunUMAP(pobj5_1K_15, dims = 1:10, verbose=FALSE)
+save(pobj5_1K_03u, pobj5_1K_08u, pobj5_1K_15u, file=paste(store5.path, 'pobj5_1K_03u.rda', sep='/'))
+
+stop('STOP - UMAP')
+
+@ 
+
+
+<<label=identtypes, echo=FALSE, eval=FALSE>>=
+allmeta5.df <- read.table(paste(dat.path, 'GSE114412_Stage_5.all.cell_metadata.tsv', sep='/'), header=TRUE, quote='', sep='\t')
+
+ec5.df <- allmeta5.df[allmeta5.df$Assigned_cluster == 'sc_ec', ] # 3404 cells
+ecc5 <- ec5.df$library.barcode
+
+slst5 <- sapply(unique(allmeta5.df$Assigned_cluster), function(x) {
+    df <- allmeta5.df[allmeta5.df$Assigned_cluster == x, ]
+    df$library.barcode
+})
+names(slst5) <- unique(allmeta5.df$Assigned_cluster)
+
+stop('STOP - here')
+
+@ 
+
+<<label=plottsne, echo=FALSE, eval=TRUE>>=
+straightcols <- unique(sub('[0-9]+', '', colors()))
+straightnogray <- straightcols[grep('grey|gray', straightcols, invert=TRUE)]
+usecolors <- sample(straightnogray, 12)
+
+@ 
+
+<<label=plotumap, echo=FALSE, eval=FALSE>>=
+if (!any(grepl('pobj5_1K_03u', ls()))) load(paste(store5.path, 'pobj5_1K_03u.rda', sep='/'))
+
+DimPlot(pobj5_1K_15u, label=TRUE) + NoLegend() + ggtitle('UMAP') + theme(title=element_text(size=10))
+
+stop('STOP - plot umap')
+
+@ 
+
+<<label=verestsne, echo=FALSE, eval=FALSE>>=
+if (!any(grepl('pobj5_1K_03_50t', ls()))) load(paste(store5.path, 'pobj5_1K_03t.rda', sep='/'))
+
+cpobj5 <- pobj5_1K_03_50t
+emb5.m <- pobj5_1K_03_50t@reductions$tsne@cell.embeddings
+
+veremb5.df <- allmeta5.df[, c(1, 4, 5)]
+rownames(veremb5.df)  <- veremb5.df$library.barcode
+veremb5.df <- veremb5.df[-1]
+veremb5.m <- as.matrix(veremb5.df)
+colnames(veremb5.m)  <- c("tSNE_1", "tSNE_2")
+
+cpobj5@reductions$tsne@cell.embeddings <- veremb5.m
+
+annot <- allmeta5.df$Assigned_cluster
+names(annot)  <- allmeta5.df$library.barcode
+cpobj5 <- AddMetaData(cpobj5, metadata=annot, col.name='Assigned_cluster')
+
+save(cpobj5, file=paste(store5.path, 'cpobj5.rda', sep='/'))
+
+stop('STOP - this')
+
+@ 
+
+% D020420
+<<label=plottingagain, echo=FALSE, eval=FALSE>>=
+if (!any(grepl('cpobj5', ls()))) load('cpobj5.rda')
+
+stop('STOP - plotting again')
+
+@ 
+<<label=findmarkers, echo=FALSE, eval=FALSE>>=
+if (!any(grepl('cpobj5', ls()))) load(paste(store5.path, 'cpobj5.rda', sep='/'))
+
+#ec1.markers5.df <- FindMarkers(cpobj5, group.by='Assigned_cluster', ident.1='sc_ec', min.pct=0.25)
+#save(ec1.markers5.df, file=paste(store5.path, 'ec1.markers5.df.rda', sep='/'))
+
+ec2.markers5.df <- FindMarkers(cpobj5, group.by='Assigned_cluster', ident.1='sc_ec', ident.2='sc_beta', min.pct=0.5, only.pos=TRUE)
+#save(ec2.markers5.df, file=paste(store5.path, 'ec2.markers5.df.rda', sep='/'))
+
+@ 
+
+% OK!
+<<label=processmarkers, echo=FALSE, eval=FALSE>>=
+#if (!any(grepl('ec1.markers5.df', ls()))) load(paste(store5.path, 'ec1.markers.df.rda', sep='/'))
+
+sigset <- rownames(ec2.markers5.df[ec2.markers5.df$p_val_adj < 0.05, ])
+write.table(sigset, file='Results/ec2.markers_stage5.txt', quote=FALSE, sep='\t', row.names=FALSE, col.names=FALSE)
+
+@ 
+<<label=check, echo=FALSE, eval=FALSE>>=
+# bash: sed -n '/^GN   Name=/ p' ecMarkers_stage5_CellMembrane_uniprot.dat > ecMarkers_stage5_CellMembrane_gene.txt
+
+ecCMmarkers5.df <- read.table('../Julia/ec2.Markers_stage5_Cell_Membrane_gene.txt', header=FALSE, sep='\t')
+ecCMmarkers5.gn <- ecCMmarkers5.df[, 1]
+
+ecCMmarkers5.gn <- sub('Name=', '', sub(' \\{.*', '', sub(';.*', '', sub('.*(Name=.*)', '\\1', ecCMmarkers5.gn))))
+
+for (gene in ecCMmarkers5.gn) {
+    message(paste('Stage5 ', gene, ' expressed in Stage6...', sep=''))
+    p <- FeaturePlot(cpobj5, features=gene)
+    plot(p)
+    Sys.sleep(3)
+}
+
+
+
+
+@ 
+
+
+\end{document}
